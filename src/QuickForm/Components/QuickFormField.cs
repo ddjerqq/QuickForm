@@ -6,75 +6,16 @@ using QuickForm.Common;
 
 namespace QuickForm.Components;
 
-internal sealed class QuickFormField<TEntity>
+internal class QuickFormField<TEntity> : IQuickFormField
     where TEntity : class, new()
 {
-    // the parent form
-    private readonly QuickForm<TEntity> _form;
-
-    private RenderFragment? _inputComponentTemplate;
-    private RenderFragment? _fieldValidationTemplate;
-
-    private QuickFormField(QuickForm<TEntity> form, PropertyInfo propertyInfo)
-    {
-        _form = form;
-        PropertyInfo = propertyInfo;
-    }
-
-    public event EventHandler? ValueChanged;
-
-    public string EditorId => _form.BaseEditorId + '_' + PropertyInfo.Name;
+    protected readonly QuickForm<TEntity> Form;
 
     public PropertyInfo PropertyInfo { get; }
 
-    public Type PropertyType => PropertyInfo.PropertyType;
+    internal Type PropertyType => PropertyInfo.PropertyType;
 
-    public TEntity Owner => _form.Model;
-
-    public object? Value
-    {
-        get => PropertyInfo.GetValue(Owner);
-        set
-        {
-            if (PropertyInfo.SetMethod is not null && !Equals(Value, value))
-            {
-                PropertyInfo.SetValue(Owner, value);
-                ValueChanged?.Invoke(this, EventArgs.Empty);
-            }
-        }
-    }
-
-    public RenderFragment InputComponentTemplate
-    {
-        get
-        {
-            return _inputComponentTemplate ??= builder =>
-            {
-                var inputComponentType = PropertyInfo.GetInputComponentType();
-
-                builder.OpenComponent(0, inputComponentType);
-                builder.AddMultipleAttributes(1, InputComponentAttributes);
-                builder.CloseComponent();
-            };
-        }
-    }
-
-    public RenderFragment ValidationMessage
-    {
-        get
-        {
-            return _fieldValidationTemplate ??= builder =>
-            {
-                var expressionContainer = ValidationMessageExpressionContainer.Create(this);
-
-                builder.OpenComponent(0, typeof(ValidationMessage<>).MakeGenericType(PropertyType));
-                builder.AddAttribute(1, "For", expressionContainer.Lambda);
-                builder.CloseComponent();
-            };
-        }
-    }
-
-    private IDictionary<string, object> InputComponentAttributes
+    public IDictionary<string, object> InputComponentAttributes
     {
         get
         {
@@ -84,9 +25,10 @@ internal sealed class QuickFormField<TEntity>
             {
                 { "id", EditorId },
                 { "Value", Value },
-                { "ValueExpression", expressionContainer.ValueExpression },
                 { "autofocus", true },
                 { "required", PropertyInfo.IsRequired() },
+                { "class", PropertyInfo.InputClass() ?? Form.FieldCssClassProvider?.Input(this) },
+                { "ValueExpression", expressionContainer.ValueExpression }
             };
 
             if (PropertyInfo.IsEditable())
@@ -100,49 +42,90 @@ internal sealed class QuickFormField<TEntity>
             }
 
             if (!string.IsNullOrEmpty(PropertyInfo.DataListName()))
-            {
                 attributes["list"] = PropertyInfo.DataListName();
-            }
 
             if (!string.IsNullOrEmpty(PropertyInfo.Placeholder()))
-            {
                 attributes["placeholder"] = PropertyInfo.Placeholder();
+
+            if (PropertyInfo.RadioAttribute() is not null)
+            {
+                // TODO implement this
+                // attributes["Field"] = this;
+                // attributes["FieldCssClassProvider"] = Form.FieldCssClassProvider;
+                // attributes["ValidationCssClassProvider"] = Form.ValidationCssClassProvider;
+
+                throw new InvalidOperationException("RadioAttribute is not implemented yet.");
             }
 
             if (PropertyInfo.IsCheckbox())
             {
-                attributes["class"] = "form-check-input";
                 attributes["role"] = "switch";
             }
-            else if (PropertyInfo.RangeAttribute() is not null)
+            else if (PropertyInfo.RangeAttribute() is { Minimum: var min, Maximum: var max })
             {
-                attributes["class"] = "form-range";
-
-                if (PropertyType == typeof(short)
-                    || PropertyType == typeof(int)
-                    || PropertyType == typeof(long))
-                {
-                    attributes["step"] = "1";
-                }
-                else
-                {
-                    attributes["step"] = "0.1";
-                }
-
-                attributes["min"] = PropertyInfo.RangeAttribute()!.Minimum;
-                attributes["max"] = PropertyInfo.RangeAttribute()!.Maximum;
-            }
-            else
-            {
-                attributes["class"] = "form-control";
+                attributes["min"] = min;
+                attributes["max"] = max;
             }
 
-            if (!string.IsNullOrEmpty(PropertyInfo.GetHtmlInputType()))
-            {
-                attributes["type"] = PropertyInfo.GetHtmlInputType();
-            }
+            if (PropertyInfo.GetHtmlInputType() is { } htmlInputType)
+                attributes["type"] = htmlInputType;
 
             return attributes!;
+        }
+    }
+
+    protected QuickFormField(QuickForm<TEntity> form, PropertyInfo propertyInfo)
+    {
+        Form = form;
+        PropertyInfo = propertyInfo;
+    }
+
+    internal event EventHandler? ValueChanged;
+
+    internal string EditorId => Form.BaseEditorId + '_' + PropertyInfo.Name;
+
+    internal TEntity? Owner => Form.Model;
+
+    internal object? Value
+    {
+        get => PropertyInfo.GetValue(Owner);
+        set
+        {
+            if (PropertyInfo.SetMethod is not null && !Equals(Value, value))
+            {
+                PropertyInfo.SetValue(Owner, value);
+                ValueChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+    }
+
+    internal RenderFragment InputComponentTemplate
+    {
+        get
+        {
+            return builder =>
+            {
+                var inputComponentType = PropertyInfo.GetInputComponentType();
+
+                builder.OpenComponent(0, inputComponentType);
+                builder.AddMultipleAttributes(1, InputComponentAttributes);
+                builder.CloseComponent();
+            };
+        }
+    }
+
+    internal RenderFragment ValidationMessage
+    {
+        get
+        {
+            return builder =>
+            {
+                var expressionContainer = ValidationMessageExpressionContainer.Create(this);
+
+                builder.OpenComponent(0, typeof(ValidationMessage<>).MakeGenericType(PropertyType));
+                builder.AddAttribute(1, "For", expressionContainer.Lambda);
+                builder.CloseComponent();
+            };
         }
     }
 
